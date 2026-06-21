@@ -1,0 +1,1941 @@
+/* =====================================
+   DOM REFERENCES
+===================================== */
+
+const chatViewport = document.getElementById("chatViewport");
+const messageList = document.getElementById("messageList");
+
+const messageInput = document.getElementById("messageInput");
+const sendBtn = document.getElementById("sendBtn");
+
+const connectionIndicator =
+  document.getElementById("connectionIndicator");
+
+const connectionText =
+  document.getElementById("connectionText");
+
+const typingIndicator =
+  document.getElementById("typingIndicator");
+
+const charCounter =
+  document.getElementById("charCounter");
+
+const toastContainer =
+  document.getElementById("toastContainer");
+
+/* =====================================
+   APP STATE
+===================================== */
+
+let messages = [];
+
+let reconnectDelay = 1000;
+
+let typingTimeout = null;
+
+let pendingQueue = [];
+
+let ws = null;
+
+/* =====================================
+   TOAST MESSAGE
+===================================== */
+
+function showToast(text) {
+
+    const toast = document.createElement("div");
+
+    toast.className = "toast";
+
+    toast.textContent = text;
+
+    toastContainer.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
+/* =====================================
+   CONNECTION STATUS
+===================================== */
+
+function setStatus(status) {
+
+    connectionIndicator.className = "status";
+
+    switch(status){
+
+        case "connected":
+
+            connectionIndicator.classList.add("connected");
+
+            connectionText.textContent =
+              "Connected";
+
+            break;
+
+        case "disconnected":
+
+            connectionIndicator.classList.add("disconnected");
+
+            connectionText.textContent =
+              "Disconnected";
+
+            break;
+
+        case "reconnecting":
+
+            connectionIndicator.classList.add("reconnecting");
+
+            connectionText.textContent =
+              "Reconnecting...";
+
+            break;
+    }
+}
+
+/* =====================================
+   WEBSOCKET MANAGER
+===================================== */
+
+class WSManager {
+
+    constructor(url){
+
+        this.url = url;
+
+        this.connect();
+    }
+
+    connect(){
+
+        setStatus("reconnecting");
+
+        ws = new WebSocket(this.url);
+
+        ws.onopen = () => {
+
+            setStatus("connected");
+
+            reconnectDelay = 1000;
+
+            showToast("Connected");
+
+            this.flushQueue();
+        };
+
+        ws.onmessage = (event) => {
+
+            let data;
+
+            try {
+
+                data = JSON.parse(event.data);
+
+            } catch {
+
+                data = {
+                    text:event.data
+                };
+            }
+
+            receiveMessage(data);
+        };
+
+        ws.onerror = () => {
+
+            ws.close();
+        };
+
+        ws.onclose = () => {
+
+            setStatus("disconnected");
+
+            showToast(
+              `Reconnecting in ${
+                  reconnectDelay/1000
+              }s`
+            );
+
+            setTimeout(() => {
+
+                this.connect();
+
+            }, reconnectDelay);
+
+            reconnectDelay =
+              Math.min(
+                reconnectDelay * 2,
+                30000
+              );
+        };
+    }
+
+    send(data){
+
+        const payload =
+          JSON.stringify(data);
+
+        if(
+            ws &&
+            ws.readyState === WebSocket.OPEN
+        ){
+
+            ws.send(payload);
+
+        }else{
+
+            pendingQueue.push(payload);
+
+            showToast(
+              "Message queued"
+            );
+        }
+    }
+
+    flushQueue(){
+
+        while(
+            pendingQueue.length > 0
+        ){
+
+            ws.send(
+              pendingQueue.shift()
+            );
+        }
+    }
+}
+
+/* =====================================
+   CREATE SOCKET
+===================================== */
+
+const socket =
+new WSManager(
+  "wss://echo.websocket.events/"
+);
+
+/* =====================================
+   TIME FORMAT
+===================================== */
+
+function formatTime(date){
+
+    return new Date(date)
+      .toLocaleTimeString([],{
+          hour:"2-digit",
+          minute:"2-digit"
+      });
+}
+
+/* =====================================
+   MESSAGE OBJECT
+===================================== */
+
+function createMessage(
+    text,
+    sender="You"
+){
+
+    return {
+
+        id:
+          Date.now() +
+          Math.random(),
+
+        text,
+
+        sender,
+
+        timestamp:
+          new Date(),
+
+        status:
+          sender === "You"
+          ? "sent"
+          : "",
+
+        self:
+          sender === "You"
+    };
+}
+
+/* =====================================
+   RENDER MESSAGE
+===================================== */
+
+function renderMessage(message){
+
+    const div =
+      document.createElement("div");
+
+    div.className =
+      message.self
+      ? "message self"
+      : "message";
+
+    div.dataset.id =
+      message.id;
+
+    div.innerHTML = `
+
+        ${
+          !message.self
+          ?
+          `
+          <div class="avatar">
+            <img src="https://i.pravatar.cc/50?img=15">
+          </div>
+          `
+          :
+          ""
+        }
+
+        <div class="message-content">
+
+            <div class="message-header">
+
+                <span class="sender">
+                    ${message.sender}
+                </span>
+
+                <span class="timestamp">
+                    ${formatTime(
+                        message.timestamp
+                    )}
+                </span>
+
+            </div>
+
+            <div class="message-text">
+                ${message.text}
+            </div>
+
+            ${
+                message.self
+                ?
+                `
+                <div class="message-status">
+
+                    <span class="
+                    status-icon
+                    ${message.status}
+                    ">
+                        ${
+                          message.status === "sent"
+                          ? "✓"
+                          : message.status === "delivered"
+                          ? "✓✓"
+                          : "✓✓"
+                        }
+                    </span>
+
+                </div>
+                `
+                :
+                ""
+            }
+
+        </div>
+    `;
+
+    messageList.appendChild(div);
+
+    scrollToBottom();
+}
+
+/* =====================================
+   SEND MESSAGE
+===================================== */
+
+function sendMessage(){
+
+    const text =
+      messageInput.value.trim();
+
+    if(!text) return;
+
+    const msg =
+      createMessage(text);
+
+    messages.push(msg);
+
+    renderMessage(msg);
+
+    socket.send({
+        type:"message",
+        text:text
+    });
+
+    updateStatus(
+      msg.id,
+      "delivered"
+    );
+
+    setTimeout(() => {
+
+        updateStatus(
+          msg.id,
+          "read"
+        );
+
+    },2000);
+
+    messageInput.value = "";
+
+    updateCounter();
+}
+
+/* =====================================
+   RECEIVE MESSAGE
+===================================== */
+
+function receiveMessage(data){
+
+    const msg =
+      createMessage(
+        data.text ||
+        "Echo message",
+        "Remote User"
+      );
+
+    msg.self = false;
+
+    messages.push(msg);
+
+    renderMessage(msg);
+
+    hideTyping();
+}
+
+/* =====================================
+   UPDATE STATUS
+===================================== */
+
+function updateStatus(
+    id,
+    status
+){
+
+    const msg =
+      messages.find(
+        m => m.id === id
+      );
+
+    if(!msg) return;
+
+    msg.status = status;
+
+    const element =
+      document.querySelector(
+       `[data-id="${id}"] .status-icon`
+      );
+
+    if(!element) return;
+
+    element.className =
+      `status-icon ${status}`;
+
+    if(status==="sent")
+        element.textContent="✓";
+
+    if(status==="delivered")
+        element.textContent="✓✓";
+
+    if(status==="read")
+        element.textContent="✓✓";
+}
+
+/* =====================================
+   SCROLL
+===================================== */
+
+function scrollToBottom(){
+
+    setTimeout(() => {
+
+        chatViewport.scrollTop =
+        chatViewport.scrollHeight;
+
+    },50);
+}
+
+/* =====================================
+   TYPING INDICATOR
+===================================== */
+
+function showTyping(){
+
+    typingIndicator
+      .classList.remove("hidden");
+}
+
+function hideTyping(){
+
+    typingIndicator
+      .classList.add("hidden");
+}
+
+messageInput.addEventListener(
+"input",
+() => {
+
+    updateCounter();
+
+    showTyping();
+
+    clearTimeout(
+      typingTimeout
+    );
+
+    typingTimeout =
+      setTimeout(() => {
+
+          hideTyping();
+
+      },1000);
+});
+
+/* =====================================
+   CHARACTER COUNTER
+===================================== */
+
+function updateCounter(){
+
+    const length =
+      messageInput.value.length;
+
+    charCounter.textContent =
+      `${length} / 1000`;
+
+    if(length >= 500){
+
+        charCounter.classList
+          .add("warning");
+
+    }else{
+
+        charCounter.classList
+          .remove("warning");
+    }
+}
+
+/* =====================================
+   SEND EVENTS
+===================================== */
+
+sendBtn.addEventListener(
+"click",
+sendMessage
+);
+
+messageInput.addEventListener(
+"keydown",
+(e) => {
+
+    if(
+        e.key === "Enter" &&
+        !e.shiftKey
+    ){
+
+        e.preventDefault();
+
+        sendMessage();
+    }
+});
+
+/* =====================================
+   START
+===================================== */
+
+setStatus(
+  "reconnecting"
+);
+
+updateCounter();
+/* =====================================
+   RELATIVE TIME FORMAT
+===================================== */
+
+function getRelativeTime(date) {
+
+    const seconds =
+        Math.floor(
+            (Date.now() - new Date(date)) / 1000
+        );
+
+    if (seconds < 60)
+        return "Just now";
+
+    const minutes =
+        Math.floor(seconds / 60);
+
+    if (minutes < 60)
+        return `${minutes}m ago`;
+
+    const hours =
+        Math.floor(minutes / 60);
+
+    if (hours < 24)
+        return `${hours}h ago`;
+
+    const days =
+        Math.floor(hours / 24);
+
+    if (days < 7)
+        return `${days}d ago`;
+
+    return new Date(date)
+        .toLocaleDateString();
+}
+
+/* =====================================
+   DATE DIVIDER
+===================================== */
+
+function createDateDivider(date) {
+
+    const divider =
+        document.createElement("div");
+
+    divider.className =
+        "date-divider";
+
+    divider.textContent =
+        new Date(date)
+        .toLocaleDateString(
+            undefined,
+            {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric"
+            }
+        );
+
+    return divider;
+}
+
+/* =====================================
+   GROUPED MESSAGE RENDERING
+===================================== */
+
+function renderGroupedMessage(
+    message,
+    previousMessage
+) {
+
+    const wrapper =
+        document.createElement("div");
+
+    const sameSender =
+        previousMessage &&
+        previousMessage.sender ===
+        message.sender;
+
+    const withinFiveMinutes =
+        previousMessage &&
+        (
+            new Date(message.timestamp)
+            -
+            new Date(
+                previousMessage.timestamp
+            )
+        ) < 300000;
+
+    const grouped =
+        sameSender &&
+        withinFiveMinutes;
+
+    wrapper.className =
+        message.self
+        ? "message self"
+        : "message";
+
+    wrapper.dataset.id =
+        message.id;
+
+    wrapper.innerHTML = `
+
+        ${
+            !grouped && !message.self
+            ?
+            `
+            <div class="avatar">
+                <img src="https://i.pravatar.cc/50?img=15">
+            </div>
+            `
+            :
+            `
+            <div style="
+                width:42px;
+            "></div>
+            `
+        }
+
+        <div class="message-content">
+
+            ${
+                !grouped
+                ?
+                `
+                <div class="message-header">
+
+                    <span class="sender">
+                        ${message.sender}
+                    </span>
+
+                    <span class="timestamp">
+                        ${getRelativeTime(
+                            message.timestamp
+                        )}
+                    </span>
+
+                </div>
+                `
+                :
+                ""
+            }
+
+            <div class="message-text">
+                ${message.text}
+            </div>
+
+        </div>
+    `;
+
+    return wrapper;
+}
+
+/* =====================================
+   VIRTUAL SCROLL SETTINGS
+===================================== */
+
+const ITEM_HEIGHT = 90;
+
+const BUFFER = 10;
+
+const MAX_VISIBLE = 30;
+
+const topSpacer =
+    document.getElementById(
+        "topSpacer"
+    );
+
+const bottomSpacer =
+    document.getElementById(
+        "bottomSpacer"
+    );
+
+/* =====================================
+   VIRTUAL RENDER
+===================================== */
+
+function renderVirtualMessages() {
+
+    const scrollTop =
+        chatViewport.scrollTop;
+
+    const viewportHeight =
+        chatViewport.clientHeight;
+
+    const startIndex =
+        Math.max(
+            0,
+            Math.floor(
+                scrollTop /
+                ITEM_HEIGHT
+            ) - BUFFER
+        );
+
+    const visibleCount =
+        Math.ceil(
+            viewportHeight /
+            ITEM_HEIGHT
+        ) + BUFFER * 2;
+
+    const endIndex =
+        Math.min(
+            messages.length,
+            startIndex +
+            visibleCount
+        );
+
+    messageList.innerHTML = "";
+
+    topSpacer.style.height =
+        `${startIndex * ITEM_HEIGHT}px`;
+
+    bottomSpacer.style.height =
+        `${(
+            messages.length -
+            endIndex
+        ) * ITEM_HEIGHT}px`;
+
+    let lastDate = null;
+
+    for (
+        let i = startIndex;
+        i < endIndex;
+        i++
+    ) {
+
+        const message =
+            messages[i];
+
+        const messageDate =
+            new Date(
+                message.timestamp
+            ).toDateString();
+
+        if (
+            lastDate !== messageDate
+        ) {
+
+            messageList.appendChild(
+                createDateDivider(
+                    message.timestamp
+                )
+            );
+
+            lastDate =
+                messageDate;
+        }
+
+        const previous =
+            i > 0
+            ? messages[i - 1]
+            : null;
+
+        messageList.appendChild(
+            renderGroupedMessage(
+                message,
+                previous
+            )
+        );
+    }
+}
+
+/* =====================================
+   SCROLL EVENT
+===================================== */
+
+chatViewport.addEventListener(
+    "scroll",
+    () => {
+
+        renderVirtualMessages();
+    }
+);
+
+/* =====================================
+   GENERATE 10,000 DEMO MESSAGES
+===================================== */
+
+function generateDemoMessages() {
+
+    const users = [
+        "Alice",
+        "Bob",
+        "Charlie",
+        "David",
+        "Emma"
+    ];
+
+    const sampleMessages = [
+
+        "Hello everyone!",
+        "Working on the project.",
+        "Looks good.",
+        "Can you review this?",
+        "Meeting at 4 PM.",
+        "Pushed new changes.",
+        "Testing completed.",
+        "Deployment successful.",
+        "Thanks!",
+        "Awesome work!"
+    ];
+
+    const startDate =
+        Date.now() -
+        (1000 * 60 * 60 * 24 * 30);
+
+    for (
+        let i = 0;
+        i < 10000;
+        i++
+    ) {
+
+        const user =
+            users[
+                Math.floor(
+                    Math.random() *
+                    users.length
+                )
+            ];
+
+        const text =
+            sampleMessages[
+                Math.floor(
+                    Math.random() *
+                    sampleMessages.length
+                )
+            ];
+
+        messages.push({
+
+            id:
+                Date.now() + i,
+
+            sender:
+                user,
+
+            text:
+                text,
+
+            timestamp:
+                new Date(
+                    startDate +
+                    i * 300000
+                ),
+
+            self:
+                user === "Alice",
+
+            status:
+                "read"
+        });
+    }
+
+    renderVirtualMessages();
+
+    chatViewport.scrollTop =
+        chatViewport.scrollHeight;
+}
+
+/* =====================================
+   OVERRIDE MESSAGE ADD
+===================================== */
+
+const originalRender =
+    renderMessage;
+
+renderMessage =
+function(message) {
+
+    renderVirtualMessages();
+
+    scrollToBottom();
+};
+
+/* =====================================
+   LIVE TIME REFRESH
+===================================== */
+
+setInterval(
+    () => {
+
+        document
+            .querySelectorAll(
+                ".timestamp"
+            )
+            .forEach(
+                element => {
+
+                    const parent =
+                        element
+                        .closest(
+                            "[data-id]"
+                        );
+
+                    if (
+                        !parent
+                    ) return;
+
+                    const id =
+                        Number(
+                            parent.dataset.id
+                        );
+
+                    const msg =
+                        messages.find(
+                            m =>
+                            m.id === id
+                        );
+
+                    if (
+                        msg
+                    ) {
+
+                        element.textContent =
+                            getRelativeTime(
+                                msg.timestamp
+                            );
+                    }
+                }
+            );
+
+    },
+    60000
+);
+
+/* =====================================
+   INITIALIZE LARGE DATASET
+===================================== */
+
+generateDemoMessages();
+/* =====================================
+   EMOJI PICKER
+===================================== */
+
+const emojiPicker =
+    document.getElementById(
+        "emojiPicker"
+    );
+
+const emojiGrid =
+    document.getElementById(
+        "emojiGrid"
+    );
+
+const closeEmojiPicker =
+    document.getElementById(
+        "closeEmojiPicker"
+    );
+
+const emojis = [
+
+    "😀","😁","😂","🤣",
+    "😊","😍","🥰","😎",
+    "🤔","😮","😢","😭",
+    "😡","👍","👎","👏",
+    "🔥","🎉","❤️","💯",
+    "🚀","🤝","👌","🙌",
+    "🥳","😅","😴","🤯",
+    "😇","🤩","🤖","💡"
+];
+
+let selectedMessageId = null;
+
+/* =====================================
+   BUILD EMOJI GRID
+===================================== */
+
+function loadEmojis() {
+
+    emojiGrid.innerHTML = "";
+
+    emojis.forEach(emoji => {
+
+        const item =
+            document.createElement(
+                "span"
+            );
+
+        item.textContent =
+            emoji;
+
+        item.addEventListener(
+            "click",
+            () => {
+
+                addReaction(
+                    selectedMessageId,
+                    emoji
+                );
+
+                emojiPicker
+                    .classList
+                    .add("hidden");
+            }
+        );
+
+        emojiGrid.appendChild(
+            item
+        );
+    });
+}
+
+loadEmojis();
+
+/* =====================================
+   OPEN PICKER
+===================================== */
+
+document.addEventListener(
+    "click",
+    e => {
+
+        if (
+            e.target.classList
+            .contains(
+                "reaction-btn"
+            )
+        ) {
+
+            const message =
+                e.target.closest(
+                    ".message"
+                );
+
+            selectedMessageId =
+                Number(
+                    message.dataset.id
+                );
+
+            emojiPicker
+                .classList
+                .remove(
+                    "hidden"
+                );
+        }
+    }
+);
+
+closeEmojiPicker
+.addEventListener(
+    "click",
+    () => {
+
+        emojiPicker
+        .classList
+        .add("hidden");
+    }
+);
+
+/* =====================================
+   REACTION STORAGE
+===================================== */
+
+function addReaction(
+    messageId,
+    emoji
+) {
+
+    const msg =
+        messages.find(
+            m =>
+            m.id === messageId
+        );
+
+    if (!msg) return;
+
+    if (!msg.reactions) {
+
+        msg.reactions = {};
+    }
+
+    if (
+        !msg.reactions[emoji]
+    ) {
+
+        msg.reactions[emoji] = 0;
+    }
+
+    msg.reactions[emoji]++;
+
+    renderVirtualMessages();
+}
+
+/* =====================================
+   PATCH GROUPED RENDER
+===================================== */
+
+const oldGroupedRender =
+    renderGroupedMessage;
+
+renderGroupedMessage =
+function(
+    message,
+    previousMessage
+) {
+
+    const element =
+        oldGroupedRender(
+            message,
+            previousMessage
+        );
+
+    const content =
+        element.querySelector(
+            ".message-content"
+        );
+
+    const reactionsDiv =
+        document.createElement(
+            "div"
+        );
+
+    reactionsDiv.className =
+        "reactions";
+
+    if (
+        message.reactions
+    ) {
+
+        Object.entries(
+            message.reactions
+        ).forEach(
+            ([emoji,count]) => {
+
+                const chip =
+                    document.createElement(
+                        "div"
+                    );
+
+                chip.className =
+                    "reaction-chip";
+
+                chip.textContent =
+                    `${emoji} ${count}`;
+
+                reactionsDiv
+                .appendChild(
+                    chip
+                );
+            }
+        );
+    }
+
+    content.appendChild(
+        reactionsDiv
+    );
+
+    const reactionBtn =
+        document.createElement(
+            "button"
+        );
+
+    reactionBtn.className =
+        "reaction-btn";
+
+    reactionBtn.textContent =
+        "😊";
+
+    element.appendChild(
+        reactionBtn
+    );
+
+    return element;
+};
+
+/* =====================================
+   READ RECEIPTS
+===================================== */
+
+function markVisibleMessagesRead() {
+
+    const visibleMessages =
+        document.querySelectorAll(
+            ".message"
+        );
+
+    visibleMessages.forEach(
+        item => {
+
+            const id =
+                Number(
+                    item.dataset.id
+                );
+
+            const msg =
+                messages.find(
+                    m =>
+                    m.id === id
+                );
+
+            if (
+                msg &&
+                msg.self
+            ) {
+
+                msg.status =
+                    "read";
+            }
+        }
+    );
+}
+
+chatViewport
+.addEventListener(
+    "scroll",
+    markVisibleMessagesRead
+);
+
+/* =====================================
+   SLASH COMMANDS
+===================================== */
+
+const commandPalette =
+    document.getElementById(
+        "commandPalette"
+    );
+
+const commands = {
+
+    "/help":
+`Available Commands
+
+/help
+/clear
+/shrug
+/tableflip
+/date`,
+
+    "/shrug":
+"¯\\_(ツ)_/¯",
+
+    "/tableflip":
+"(╯°□°）╯︵ ┻━┻",
+
+    "/date":
+new Date()
+.toLocaleString()
+};
+
+/* =====================================
+   SHOW COMMAND LIST
+===================================== */
+
+messageInput
+.addEventListener(
+    "input",
+    () => {
+
+        const value =
+            messageInput.value;
+
+        if (
+            value.startsWith("/")
+        ) {
+
+            commandPalette
+            .classList
+            .remove(
+                "hidden"
+            );
+
+        } else {
+
+            commandPalette
+            .classList
+            .add(
+                "hidden"
+            );
+        }
+    }
+);
+
+/* =====================================
+   CLICK COMMAND
+===================================== */
+
+document
+.querySelectorAll(
+    "#commandPalette li"
+)
+.forEach(item => {
+
+    item.addEventListener(
+        "click",
+        () => {
+
+            messageInput.value =
+                item.textContent;
+
+            commandPalette
+            .classList
+            .add(
+                "hidden"
+            );
+
+            updateCounter();
+        }
+    );
+});
+
+/* =====================================
+   EXECUTE COMMAND
+===================================== */
+
+const originalSend =
+    sendMessage;
+
+sendMessage =
+function() {
+
+    const value =
+        messageInput.value
+        .trim();
+
+    if (
+        value.startsWith("/")
+    ) {
+
+        if (
+            value === "/clear"
+        ) {
+
+            messages = [];
+
+            renderVirtualMessages();
+
+            messageInput.value =
+                "";
+
+            return;
+        }
+
+        if (
+            commands[value]
+        ) {
+
+            const msg =
+                createMessage(
+                    commands[value]
+                );
+
+            messages.push(
+                msg
+            );
+
+            renderVirtualMessages();
+
+            messageInput.value =
+                "";
+
+            return;
+        }
+    }
+
+    originalSend();
+};
+
+/* =====================================
+   KEYBOARD SHORTCUTS
+===================================== */
+
+document.addEventListener(
+    "keydown",
+    e => {
+
+        if (
+            e.ctrlKey &&
+            e.key === "l"
+        ) {
+
+            e.preventDefault();
+
+            messages = [];
+
+            renderVirtualMessages();
+
+            showToast(
+                "Chat Cleared"
+            );
+        }
+    }
+);
+
+/* =====================================
+   INITIAL READ PASS
+===================================== */
+
+markVisibleMessagesRead();
+/* =====================================
+   NOTIFICATIONS API
+===================================== */
+
+const notificationBtn =
+document.getElementById(
+    "notificationBtn"
+);
+
+notificationBtn.addEventListener(
+    "click",
+    async () => {
+
+        if (
+            !("Notification" in window)
+        ) {
+
+            showToast(
+                "Notifications not supported"
+            );
+
+            return;
+        }
+
+        const permission =
+            await Notification
+            .requestPermission();
+
+        if (
+            permission === "granted"
+        ) {
+
+            showToast(
+                "Notifications enabled"
+            );
+
+        } else {
+
+            showToast(
+                "Permission denied"
+            );
+        }
+    }
+);
+
+function notifyUser(message) {
+
+    if (
+        Notification.permission ===
+        "granted"
+    ) {
+
+        new Notification(
+            "New Message",
+            {
+                body: message.text,
+                icon:
+                "https://cdn-icons-png.flaticon.com/512/5968/5968770.png"
+            }
+        );
+    }
+}
+
+/* =====================================
+   PATCH RECEIVE MESSAGE
+===================================== */
+
+const oldReceive =
+receiveMessage;
+
+receiveMessage =
+function(data){
+
+    oldReceive(data);
+
+    notifyUser({
+        text:
+        data.text ||
+        "New Message"
+    });
+};
+
+/* =====================================
+   FILE INPUT
+===================================== */
+
+const fileInput =
+document.getElementById(
+    "fileInput"
+);
+
+const imagePreviewContainer =
+document.getElementById(
+    "imagePreviewContainer"
+);
+
+const filePreviewContainer =
+document.getElementById(
+    "filePreviewContainer"
+);
+
+let selectedFile = null;
+
+/* =====================================
+   FILE SELECTION
+===================================== */
+
+fileInput.addEventListener(
+    "change",
+    event => {
+
+        const file =
+            event.target.files[0];
+
+        if (!file) return;
+
+        selectedFile = file;
+
+        previewFile(file);
+    }
+);
+
+/* =====================================
+   PREVIEW FILE
+===================================== */
+
+function previewFile(file){
+
+    imagePreviewContainer.innerHTML =
+    "";
+
+    filePreviewContainer.innerHTML =
+    "";
+
+    if (
+        file.type.startsWith(
+            "image/"
+        )
+    ) {
+
+        const reader =
+            new FileReader();
+
+        reader.onload =
+        e => {
+
+            imagePreviewContainer
+            .innerHTML = `
+
+            <div class="preview-card">
+
+                <img
+                src="${e.target.result}"
+                alt="preview">
+
+                <span>
+                    ${file.name}
+                </span>
+
+            </div>
+            `;
+        };
+
+        reader.readAsDataURL(
+            file
+        );
+
+    } else {
+
+        filePreviewContainer
+        .innerHTML = `
+
+        <div class="preview-card">
+
+            📄
+
+            <span>
+                ${file.name}
+            </span>
+
+        </div>
+        `;
+    }
+}
+
+/* =====================================
+   PATCH SEND MESSAGE
+===================================== */
+
+const oldSend =
+sendMessage;
+
+sendMessage =
+function(){
+
+    const text =
+        messageInput.value.trim();
+
+    if (
+        !text &&
+        !selectedFile
+    ) return;
+
+    const msg =
+    createMessage(
+        text || "Attachment"
+    );
+
+    if (selectedFile){
+
+        msg.file =
+        selectedFile.name;
+
+        if (
+            selectedFile.type
+            .startsWith(
+                "image/"
+            )
+        ){
+
+            msg.image =
+            URL.createObjectURL(
+                selectedFile
+            );
+        }
+    }
+
+    messages.push(msg);
+
+    renderVirtualMessages();
+
+    socket.send({
+
+        type:"message",
+
+        text:
+        msg.text
+    });
+
+    messageInput.value = "";
+
+    imagePreviewContainer
+    .innerHTML = "";
+
+    filePreviewContainer
+    .innerHTML = "";
+
+    selectedFile = null;
+
+    updateCounter();
+
+    scrollToBottom();
+};
+
+/* =====================================
+   PATCH RENDER
+===================================== */
+
+const oldRenderGrouped =
+renderGroupedMessage;
+
+renderGroupedMessage =
+function(
+    message,
+    previous
+){
+
+    const element =
+        oldRenderGrouped(
+            message,
+            previous
+        );
+
+    const content =
+        element.querySelector(
+            ".message-content"
+        );
+
+    if (
+        message.image
+    ){
+
+        const img =
+        document.createElement(
+            "img"
+        );
+
+        img.src =
+            message.image;
+
+        img.style.maxWidth =
+            "250px";
+
+        img.style.marginTop =
+            "10px";
+
+        img.style.borderRadius =
+            "10px";
+
+        content.appendChild(
+            img
+        );
+    }
+
+    if (
+        message.file
+    ){
+
+        const file =
+        document.createElement(
+            "div"
+        );
+
+        file.className =
+            "message-file";
+
+        file.textContent =
+            "📄 " +
+            message.file;
+
+        content.appendChild(
+            file
+        );
+    }
+
+    return element;
+};
+
+/* =====================================
+   DRAG & DROP
+===================================== */
+
+document.addEventListener(
+    "dragover",
+    e => {
+
+        e.preventDefault();
+    }
+);
+
+document.addEventListener(
+    "drop",
+    e => {
+
+        e.preventDefault();
+
+        const file =
+        e.dataTransfer.files[0];
+
+        if (
+            file
+        ){
+
+            selectedFile =
+            file;
+
+            previewFile(
+                file
+            );
+        }
+    }
+);
+
+/* =====================================
+   PASTE IMAGE SUPPORT
+===================================== */
+
+messageInput.addEventListener(
+    "paste",
+    event => {
+
+        const items =
+            event.clipboardData
+            .items;
+
+        for (
+            let item of items
+        ){
+
+            if (
+                item.type
+                .includes(
+                    "image"
+                )
+            ){
+
+                const file =
+                item.getAsFile();
+
+                selectedFile =
+                file;
+
+                previewFile(
+                    file
+                );
+            }
+        }
+    }
+);
+
+/* =====================================
+   ONLINE / OFFLINE STATUS
+===================================== */
+
+window.addEventListener(
+    "offline",
+    () => {
+
+        showToast(
+            "Offline Mode"
+        );
+
+        setStatus(
+            "disconnected"
+        );
+    }
+);
+
+window.addEventListener(
+    "online",
+    () => {
+
+        showToast(
+            "Back Online"
+        );
+
+        setStatus(
+            "connected"
+        );
+    }
+);
+
+/* =====================================
+   SERVICE WORKER
+===================================== */
+
+if (
+    "serviceWorker" in
+    navigator
+){
+
+    window.addEventListener(
+        "load",
+        () => {
+
+            navigator
+            .serviceWorker
+            .register(
+                "./service-worker.js"
+            )
+            .then(() => {
+
+                console.log(
+                    "SW Registered"
+                );
+            })
+            .catch(
+                error => {
+
+                console.error(
+                    error
+                );
+
+            });
+        }
+    );
+}
+
+/* =====================================
+   INSTALL PROMPT
+===================================== */
+
+let deferredPrompt;
+
+window.addEventListener(
+    "beforeinstallprompt",
+    event => {
+
+        event.preventDefault();
+
+        deferredPrompt =
+            event;
+
+        showToast(
+            "App can be installed"
+        );
+    }
+);
+
+/* =====================================
+   FINAL STARTUP MESSAGE
+===================================== */
+
+showToast(
+    "Chat UI Ready"
+);

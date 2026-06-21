@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Real-Time Chat UI</title>
+
+    <link rel="stylesheet" href="style.css" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#6c63ff">
+</head>
+<body>
+
+    <!-- APP CONTAINER -->
+    <div class="app">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>💬 ChatFlow</h2>
+            </div>
+
+            <div class="profile-card">
+                <img
+                    src="https://i.pravatar.cc/100?img=12"
+                    alt="User"
+                    class="profile-avatar"
+                >
+                <div>
+                    <h3>You</h3>
+                    <p>Online</p>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h4>Channels</h4>
+
+                <ul class="channel-list">
+                    <li class="active"># General</li>
+                    <li># Development</li>
+                    <li># Design</li>
+                    <li># Random</li>
+                </ul>
+            </div>
+        </aside>
+
+        <!-- CHAT AREA -->
+        <main class="chat-area">
+
+            <!-- HEADER -->
+            <header class="chat-header">
+
+                <div class="header-left">
+                    <div id="connectionIndicator" class="status connected"></div>
+
+                    <div>
+                        <h2>General Chat</h2>
+                        <p id="connectionText">
+                            Connected
+                        </p>
+                    </div>
+                </div>
+
+                <div class="header-right">
+
+                    <button id="notificationBtn">
+                        🔔 Enable Notifications
+                    </button>
+
+                </div>
+
+            </header>
+
+            <!-- DATE DIVIDER -->
+            <div id="dateDividerContainer"></div>
+
+            <!-- MESSAGES CONTAINER -->
+            <section id="chatViewport">
+
+                <!-- TOP SPACER FOR VIRTUAL SCROLL -->
+                <div id="topSpacer"></div>
+
+                <!-- VISIBLE MESSAGES -->
+                <div id="messageList"></div>
+
+                <!-- BOTTOM SPACER -->
+                <div id="bottomSpacer"></div>
+
+            </section>
+
+            <!-- TYPING INDICATOR -->
+            <div id="typingIndicator" class="typing-indicator hidden">
+
+                <div class="typing-avatar"></div>
+
+                <span>User is typing</span>
+
+                <div class="dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+
+            </div>
+
+            <!-- IMAGE PREVIEW -->
+            <div id="imagePreviewContainer"></div>
+
+            <!-- FILE PREVIEW -->
+            <div id="filePreviewContainer"></div>
+
+            <!-- SLASH COMMANDS -->
+            <div id="commandPalette" class="hidden">
+
+                <ul>
+                    <li>/help</li>
+                    <li>/clear</li>
+                    <li>/shrug</li>
+                    <li>/tableflip</li>
+                    <li>/date</li>
+                </ul>
+
+            </div>
+
+            <!-- INPUT SECTION -->
+            <footer class="chat-footer">
+
+                <div class="input-wrapper">
+
+                    <textarea
+                        id="messageInput"
+                        placeholder="Type a message..."
+                        maxlength="1000"
+                    ></textarea>
+
+                    <div class="input-tools">
+
+                        <label class="upload-btn">
+                            📎
+                            <input
+                                type="file"
+                                id="fileInput"
+                                hidden
+                            >
+                        </label>
+
+                        <span
+                            id="charCounter"
+                        >
+                            0 / 1000
+                        </span>
+
+                    </div>
+
+                </div>
+
+                <button id="sendBtn">
+                    Send ➤
+                </button>
+
+            </footer>
+
+        </main>
+
+    </div>
+
+    <!-- EMOJI PICKER -->
+    <div id="emojiPicker" class="emoji-picker hidden">
+
+        <div class="emoji-header">
+            <h3>Emoji Reactions</h3>
+            <button id="closeEmojiPicker">
+                ✕
+            </button>
+        </div>
+
+        <div id="emojiGrid" class="emoji-grid"></div>
+
+    </div>
+
+    <!-- MESSAGE TEMPLATE -->
+    <template id="messageTemplate">
+
+        <div class="message">
+
+            <div class="avatar">
+                <img src="" alt="">
+            </div>
+
+            <div class="message-content">
+
+                <div class="message-header">
+
+                    <span class="sender"></span>
+
+                    <span class="timestamp"></span>
+
+                </div>
+
+                <div class="message-text"></div>
+
+                <div class="message-image"></div>
+
+                <div class="message-file"></div>
+
+                <div class="message-status">
+
+                    <span class="status-icon sent">
+                        ✓
+                    </span>
+
+                </div>
+
+                <div class="reactions"></div>
+
+            </div>
+
+            <button class="reaction-btn">
+                😊
+            </button>
+
+        </div>
+
+    </template>
+
+    <!-- TOAST -->
+    <div id="toastContainer"></div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
